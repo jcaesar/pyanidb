@@ -145,6 +145,25 @@ class AniDB:
 				self.auth()
 			else:
 				raise AniDBReplyError(code, text)
+
+	def get_mylist(self, fid, retry = False):
+		try:
+			size, ed2k = fid
+			args = {'size': size, 'ed2k': ed2k}
+		except TypeError:
+			args = {'fid': fid}
+		args.update({'s': self.session})
+		while 1:
+			code, text, data = self.execute('MYLIST', args, retry)
+			if code == 221:
+				return dict([(name, data[0].pop(0)) for name in 
+					['lid', 'fid', 'eid', 'aid', 'gid', 'date', 'state', 'viewdate', 'storage', 'source', 'other', 'filestate']])
+			elif code == 321:
+				raise AniDBUnknownFile()
+			elif code in (501, 506):
+				self.auth()
+			else:
+				raise AniDBReplyError(code, text)
 	
 	def add_file(self, fid, state = None, viewed = False, source = None, storage = None, other = None, edit = False, retry = False):
 		try:
@@ -175,6 +194,18 @@ class AniDB:
 				raise AniDBUnknownFile()
 			elif code == 411:
 				raise AniDBNotInMylist()
+			elif code in (501, 506):
+				self.auth()
+			else:
+				raise AniDBReplyError(code, text)
+
+	def edit_file(self, lid, edits, retry = False):
+		args = {'lid': lid, 's': self.session, 'edit': 1}
+		args.update(edits)
+		while 1:
+			code, text, data = self.execute('MYLISTADD', args, retry)
+			if code == 311:
+				return;
 			elif code in (501, 506):
 				self.auth()
 			else:

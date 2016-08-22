@@ -1,4 +1,4 @@
-import threading, time, os, hashlib, binascii
+import threading, time, os, hashlib, binascii, re, pprint
 try:
 	import xattr
 except ImportError:
@@ -101,6 +101,14 @@ class File:
 			if name.decode().startswith('user.pyanidb.'):
 				xattr.remove(self.name, name)
 
+class NoFile:
+    def __init__(self, name, size, ed2k):
+        self.name = name
+        self.size = size
+        self.mtime = 0
+        self.cached = False
+        self.ed2k = ed2k
+
 class Hashthread(threading.Thread):
 	def __init__(self, filelist, hashlist, algorithms, cache, *args, **kwargs):
 		self.filelist = filelist
@@ -129,3 +137,13 @@ def hash_files(files, cache = False, algorithms = ('ed2k',), num_threads = 1):
 		except IndexError:
 			time.sleep(0.1)
 	raise StopIteration
+
+def loadlist(files):
+	ed = re.compile('ed2k://\|file\|(.*)\|(.*)\|(.*)\|/')
+	for fp in files:
+		with open(fp) as f:
+			for line in f:
+				m = ed.match(line)
+				if m:
+					(n,s,h) = m.groups()
+					yield NoFile(n,s,h)

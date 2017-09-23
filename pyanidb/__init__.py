@@ -4,6 +4,17 @@ protover = 3
 client = 'pyanidb'
 clientver = 7
 
+storages = {
+	'normal': 0,
+	'corrupted': 1,
+	'edited': 2,
+	'ripped': 10,
+	'dvd': 11,
+	'vhs': 12,
+	'tv': 13,
+	'theatre': 14,
+	'streamed': 15,
+	'other': 100}
 states = {
 	'unknown': 0,
 	'hdd': 1,
@@ -26,6 +37,13 @@ acode = (
 
 info = fcode + acode
 info = dict([(info[i], 1 << i) for i in range(len(info)) if info[i]])
+
+def static_vars(**kwargs):
+	def decorate(func):
+		for k in kwargs:
+			setattr(func, k, kwargs[k])
+		return func
+	return decorate
 
 class AniDBError(Exception):
 	pass
@@ -107,7 +125,7 @@ class AniDB:
 			return None
 	
 	def auth(self):
-		code, text, data = self.execute('AUTH', {'user': self.username, 'pass': self.password, 'protover': protover, 'client': client, 'clientver': clientver})
+		code, text, data = self.execute('AUTH', {'user': self.username, 'pass': self.password, 'protover': protover, 'client': client, 'clientver': clientver, 'enc': 'utf-8'})
 		if code in (200, 201):
 			self.session = text.split(' ', 1)[0]
 			if code == 201:
@@ -164,48 +182,49 @@ class AniDB:
 				self.auth()
 			else:
 				raise AniDBReplyError(code, text)
-	
-	def add_file(self, fid, state = None, viewed = False, source = None, storage = None, other = None, edit = False, retry = False):
-		try:
-			size, ed2k = fid
-			args = {'size': size, 'ed2k': ed2k}
-		except TypeError:
-			args = {'fid': fid}
-		if not edit and state == None:
-			state = 'hdd'
-		if state != None:
-			args['state'] = states[state]
+	@static_vars(try_edit=0)
+	def add_file(self, fid = None, lid = None, state = None, viewed = False, source = None, storage = None, other = None, edit = None, retry = False):
+		if lid is not None:
+			args = {'lid': lid}
+			edit = True
+		else:
+			try:
+				size, ed2k = fid
+				args = {'size': size, 'ed2k': ed2k}
+			except TypeError:
+				args = {'fid': fid}
 		if viewed != None:
 			args['viewed'] = int(bool(viewed))
 		if source != None:
 			args['source'] = source
 		if storage != None:
-			args['storage'] = storage
+			args['storage'] = storages[storage]
+		if state != None:
+			args['state'] = states[state]
 		if other != None:
 			args['other'] = other
-		if edit:
-			args['edit'] = 1
+		if edit is not None:
+			args['edit'] = (1 if edit else 0)
 		args['s'] = self.session
 		while 1:
+			if edit is None:
+				if AniDB.add_file.try_edit:
+					args['edit'] = 1
+				else:
+					args.pop('edit', 0)
 			code, text, data = self.execute('MYLISTADD', args, retry)
-			if code in (210, 310, 311):
+			if code in (210, 311):
 				return
+			elif code == 310:
+				AniDB.add_file.try_edit = True
+				if edit is False:
+					return
 			elif code == 320:
 				raise AniDBUnknownFile()
 			elif code == 411:
-				raise AniDBNotInMylist()
-			elif code in (501, 506):
-				self.auth()
-			else:
-				raise AniDBReplyError(code, text)
-
-	def edit_file(self, lid, edits, retry = False):
-		args = {'lid': lid, 's': self.session, 'edit': 1}
-		args.update(edits)
-		while 1:
-			code, text, data = self.execute('MYLISTADD', args, retry)
-			if code == 311:
-				return;
+				AniDB.add_file.try_edit = False
+				if edit is True:
+					raise AniDBNotInMylist()
 			elif code in (501, 506):
 				self.auth()
 			else:

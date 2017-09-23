@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 
-import pyanidb, pyanidb.hash, pprint
+import pyanidb, pyanidb.hash, sys, re, shutil, traceback
 try:
 	import ConfigParser
 except ImportError:
@@ -12,6 +12,10 @@ from collections import deque
 if hasattr(__builtins__, 'raw_input'):
 	input = raw_input
 
+def printfl(s):
+	print(s)
+	sys.stdout.flush()
+
 # Colors.
 
 red    = lambda x: '\x1b[1;31m' + x + '\x1b[0m'
@@ -22,13 +26,10 @@ blue   = lambda x: '\x1b[1;34m' + x + '\x1b[0m'
 # Config.
 
 config = {}
-try:
-	cp = ConfigParser.ConfigParser()
-	cp.read(os.path.expanduser('~/.pyanidb.conf'))
-	for option in cp.options('pyanidb'):
-		config[option] = cp.get('pyanidb', option)
-except:
-	pass
+cp = ConfigParser.ConfigParser()
+cp.read(os.path.expanduser('~/.pyanidb.conf'))
+for option in cp.options('pyanidb'):
+	config[option] = cp.get('pyanidb', option)
 
 # Options.
 
@@ -52,11 +53,15 @@ op.add_option('-i', '--identify', help = 'Identify files.',
 	action = 'store_true', dest = 'identify', default = False)
 op.add_option('-a', '--add', help = 'Add files to mylist.',
 	action = 'store_true', dest = 'add', default = False)
-op.add_option('-w', '--watched', help = 'Mark files watched.',
-	action = 'store_true', dest = 'watched', default = False)
+op.add_option('-W', '--watched', help = 'Mark files watched.',
+	action = 'store_true', dest = 'watched', default = None)
+op.add_option('-U', '--unwatched', help = 'Mark files not watched.',
+	action = 'store_false', dest = 'watched', default = None)
 
 op.add_option('-n', '--rename', help = 'Rename files.',
 	action = 'store_true', dest = 'rename', default = False)
+op.add_option('-C', '--copy', help = 'Copy files.',
+	action = 'store_true', dest = 'copy', default = False)
 op.add_option('-f', '--format', help = 'Filename format.',
 	action = 'store', dest = 'format', default = config.get('format'))
 
@@ -65,7 +70,18 @@ op.add_option('-d', '--mark-deleted', help = 'Mark files deleted in anidb',
 op.add_option('-l', '--readlist', help = 'Instead hashing the argument files, take their contents as a list of hashes.',
 	action = 'store_true', dest = 'hashlist', default = config.get('hashlist'))
 
+op.add_option('-P', '--plain-output', help = 'Do not format output in color',
+	action = 'store_false', dest = 'color_output', default = True)
+
+op.add_option('--storage', help = 'Set storage type. Possible values:\n{0}'.format(', '.join(pyanidb.storages.keys())),
+	action = 'store', dest = 'storage', default = None)
+op.add_option('--state', help = 'Set state. Possible values:\n{0}'.format(', '.join(pyanidb.states.keys())),
+	action = 'store', dest = 'state', default = None)
+
 options, args = op.parse_args(sys.argv[1:])
+
+if not options.color_output:
+	red = green = yellow = blue = lambda x: x
 
 # Defaults.
 
@@ -73,14 +89,15 @@ if options.cache:
 	try:
 		import xattr
 	except ImportError:
-		print(red('No xattr, caching disabled.'))
+		printfl(red('No xattr, caching disabled.'))
 		options.cache = False
-options.identify = options.identify or options.rename
+options.add = options.add or options.storage or options.state or options.watched
+options.identify = options.identify or options.rename or options.copy
 options.login = options.add or options.watched or options.identify or options.mark_deleted
 if not options.suffix:
 	options.suffix = ['avi', 'ogm', 'mkv']
 if not options.format:
-	options.format = r'_[%group]_%anime_-_%epno%ver_[%CRC].%suf'
+	options.format = r'_~/video/anime/$animeromaji/$animekanji_-_$epno$ver_[$group][$CRC].$suf'
 
 if options.login:
 	if not options.username:
@@ -95,12 +112,12 @@ remaining = deque(args)
 while remaining:
 	name = remaining.popleft()
 	if not os.access(name, os.R_OK):
-		print('{0} {1}'.format(red('Invalid file:'), name))
+		printfl('{0} {1}'.format(red('Invalid file:'), name))
 	elif os.path.isfile(name):
 		files.append(name)
 	elif os.path.isdir(name):
 		if not options.recursive:
-			print('{0} {1}'.format(red('Is a directory:'), name))
+			printfl('{0} {1}'.format(red('Is a directory:'), name))
 		else:
 			for sub in sorted(os.listdir(name)):
 				if sub.startswith('.'):
@@ -112,7 +129,7 @@ while remaining:
 					remaining.appendleft(sub)
 
 if not files:
-	print(blue('Nothing to do.'))
+	printfl(blue('Nothing to do.'))
 	sys.exit(0)
 
 # Authorization.
@@ -121,15 +138,15 @@ if options.login:
 	a = pyanidb.AniDB(options.username, options.password)
 	try:
 		a.auth()
-		print('{0} {1}'.format(blue('Logged in as user:'), options.username))
+		printfl('{0} {1}'.format(blue('Logged in as user:'), options.username))
 	except pyanidb.AniDBUserError:
-		print(red('Invalid username/password.'))
+		printfl(red('Invalid username/password.'))
 		sys.exit(1)
 	except pyanidb.AniDBTimeout:
-		print(red('Connection timed out.'))
+		printfl(red('Connection timed out.'))
 		sys.exit(1)
 	except pyanidb.AniDBError as e:
-		print('{0} {1}'.format(red('Fatal error:'), e))
+		printfl('{0} {1}'.format(red('Fatal error:'), e))
 		sys.exit(1)
 
 # Hashing.
@@ -143,7 +160,7 @@ else:
     fhashes = pyanidb.hash.hash_files(files, options.cache, (('ed2k', 'md5', 'sha1', 'crc32') if options.multihash else ('ed2k',)))
 
 for file in fhashes:
-	print('{0} ed2k://|file|{1}|{2}|{3}|{4}'.format(blue('Hashed:'),  file.name, file.size, file.ed2k, ' (cached)' if file.cached else ''))
+	printfl('{0} ed2k://|file|{1}|{2}|{3}|{4}'.format(blue('Hashed:'),  file.name, file.size, file.ed2k, ' (cached)' if file.cached else ''))
 	fid = (file.size, file.ed2k)
 	hashed += 1
 	
@@ -151,65 +168,77 @@ for file in fhashes:
 		
 		# Multihash.
 		if options.multihash:
-			print('{0} {1}'.format(blue('MD5:'), file.md5))
-			print('{0} {1}'.format(blue('SHA1:'), file.sha1))
-			print('{0} {1}'.format(blue('CRC32:'), file.crc32))
+			printfl('{0} {1}'.format(blue('MD5:'), file.md5))
+			printfl('{0} {1}'.format(blue('SHA1:'), file.sha1))
+			printfl('{0} {1}'.format(blue('CRC32:'), file.crc32))
 		
 		# Identify.
 		
 		if options.identify:
-			info = a.get_file(fid, ('gtag', 'romaji', 'epno', 'state', 'epromaji', 'crc32', 'filetype'), True)
+			info = a.get_file(fid, ('gtag', 'romaji', 'epno', 'state', 'kanji', 'epkanji', 'crc32', 'filetype'), True)
 			fid = int(info['fid'])
-			print('{0} [{1}] {2} - {3} - {4}'.format(green('Identified:'), info['gtag'], info['romaji'], info['epno'], info['epromaji']))
-		
-		# Renaming.
-		
-		if options.rename:
-			s = options.format
-			rename_data = {
-				'group': info['gtag'],
-				'anime': info['romaji'],
-				'epno': info['epno'],
-				'ver': {0: '', 4: 'v2', 8: 'v3', 16: 'v4', 32: 'v5'}[(int(info['state']) & 0x3c)],
-				'crc': info['crc32'],
-				'CRC': info['crc32'].upper(),
-				'suf': info['filetype']}
-			for name, value in rename_data.items():
-				s = s.replace(r'%' + name, value)
-			if s[0] == '_':
-				s = s[1:].replace(' ', '_')
-			s = s.replace('/', '_')
-			
-			print('{0} {1}'.format(yellow('Renaming to:'), s))
-			os.rename(file.name, os.path.join(os.path.split(file.name)[0], s))
+			printfl('{0} [{1}] {2} - {3} - {4}'.format(green('Identified:'), info['gtag'], info['kanji'], info['epno'], info['epkanji']))
 		
 		# Adding.
 		
 		if options.add:
-			a.add_file(fid, viewed = options.watched, retry = True)
-			print(green('Added to mylist.'))
+			a.add_file(fid, viewed = options.watched, retry = True, storage = options.storage, state = options.state)
+			printfl(green('Added to mylist.'))
 		
-		# Watched.
-		
-		elif options.watched:
-			a.add_file(fid, viewed = True, edit = True, retry = True)
-			print(green('Marked watched.'))
-
 		elif options.mark_deleted:
 			mld = a.get_mylist(fid, retry = True)
-			if mld['state'] == '1':
-				print('File {0} is marked on hdd will be {1} deleted.'.format(file.name, red('marked')))
-				a.edit_file(lid = mld['lid'], edits = {'state': 3}, retry = True)
+			if int(mld['state']) == int(pyanidb.states['hdd']):
+				printfl('File {0} is marked on hdd will be {1} deleted.'.format(file.name, red('marked')))
+				a.add_file(lid = mld['lid'], state='deleted', retry = True)
 			else:
-				print('File {0} is state {1} and will not be touched.'.format(file.name, green(mld['state'])))
+				printfl('File {0} has state {1} and will not be touched.'.format(file.name, green(mld['state'])))
 		
+		# Renaming.
+		
+		if options.rename or options.copy:
+			s = options.format
+			rename_data = {
+				'group': info['gtag'],
+				'animeromaji': info['romaji'],
+				'animekanji': info['kanji'],
+				'epkanji': info['epkanji'],
+				'epno': info['epno'],
+				'ver': {0: '', 4: 'v2', 8: 'v3', 16: 'v4', 32: 'v5'}[(int(info['state']) & 0x3c)],
+				'crc': info['crc32'].lower(),
+				'CRC': info['crc32'].upper(),
+				'suf': info['filetype']}
+			s = os.path.expanduser(s)
+			for name, value in rename_data.items():
+				value = value.replace('/', ' ')
+				nvalue = re.compile('[^一-龠ぁ-ゔァ-ヴーa-zA-Z0-9ａ-ｚＡ-Ｚ０-９々〆〤]+').sub('_', value)
+				s = s.replace(r'$' + name, value)
+				s = s.replace(r'$_' + name, nvalue)
+			s = re.compile('([_ ])[_ ]*').sub(lambda x: x.group(1), s)
+			
+			if os.path.abspath(file.name) == os.path.abspath(s):
+				printfl('File {0} {1}.'.format(file.name, green('is already in place')))
+			else:
+				printfl('{0} {1}'.format(yellow('Renaming to:'), s))
+				try:
+					basepath = os.path.dirname(s)
+					if not os.path.exists(basepath):
+						os.makedirs(basepath) # this is racy
+					if options.rename:
+						shutil.move(file.name, s)
+					elif options.copy:
+						shutil.copy2(file.name, s)
+					else:
+						raise Exception()
+				except:
+					traceback.print_exc()
+	
 	except pyanidb.AniDBUnknownFile:
-		print(red('Unknown file.'))
+		printfl(red('Unknown file.'))
 		unknown += 1
 	
 	except pyanidb.AniDBNotInMylist:
-		print(red('File not in mylist.'))
+		printfl(red('File not in mylist.'))
 
 # Finished.
 
-print(blue('Hashed {0} files{1}.'.format(hashed, ', {0} unknown'.format(unknown) if unknown else '')))
+printfl(blue('Hashed {0} files{1}.'.format(hashed, ', {0} unknown'.format(unknown) if unknown else '')))

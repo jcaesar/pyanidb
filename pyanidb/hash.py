@@ -120,6 +120,8 @@ class Hashthread(threading.Thread):
 		try:
 			while 1:
 				f = self.filelist.pop(0)
+				while len(self.hashlist) > 10:
+					time.sleep(0.5)
 				self.hashlist.append(File(f, self.algorithms, self.cache))
 		except IndexError:
 			return

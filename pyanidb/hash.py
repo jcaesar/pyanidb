@@ -133,7 +133,7 @@ def hash_files(files, cache = False, algorithms = ('ed2k',), num_threads = 1):
 		thread = Hashthread(files, hashlist, algorithms, cache)
 		thread.start()
 		threads.append(thread)
-	while hashlist or sum([thread.isAlive() for thread in threads]):
+	while hashlist or sum([thread.is_alive() for thread in threads]):
 		try:
 			yield hashlist.pop(0)
 		except IndexError:

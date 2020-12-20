@@ -77,7 +77,7 @@ class File:
 	def read_cache(self):
 		if not xattr:
 			return
-		cache = dict([(n[13:], xattr.get(self.name, n)) for n in xattr.list(self.name) if n.decode().startswith('user.pyanidb.')])
+		cache = dict([(n[13:], xattr.getxattr(self.name, n)) for n in xattr.listxattr(self.name) if n.startswith('user.pyanidb.')])
 		if 'mtime' not in cache or str(int(self.mtime)) != cache.pop('mtime'):
 			return
 		for n, v in cache.items():
@@ -89,17 +89,17 @@ class File:
 			return
 		try:
 			self.clear_cache()
-			xattr.set(self.name, 'user.pyanidb.mtime', str(int(self.mtime)))
+			xattr.setxattr(self.name, 'user.pyanidb.mtime', bytes(str(int(self.mtime)), 'utf-8'))
 			for n in ('ed2k', 'md5', 'sha1', 'crc32'):
 				if hasattr(self, n):
-					xattr.set(self.name, 'user.pyanidb.' + n, getattr(self, n))
+					xattr.setxattr(self.name, 'user.pyanidb.' + n, bytes(getattr(self, n), 'utf-8'))
 		except IOError:
 			pass
 	
 	def clear_cache(self):
-		for name in xattr.list(self.name):
-			if name.decode().startswith('user.pyanidb.'):
-				xattr.remove(self.name, name)
+		for name in xattr.listxattr(self.name):
+			if name.startswith('user.pyanidb.'):
+				xattr.removexattr(self.name, name)
 
 class NoFile:
     def __init__(self, name, size, ed2k):

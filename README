@@ -1,20 +1,10 @@
 PyAniDB
 =========
 
-PyAniDB is a client for AniDB's UDP API. (http://anidb.net/)
-
-Installation
-============
-
-For manual installation; run:
-
-  ./setup.py build
-  sudo ./setup.py install
-
 Usage
 =====
 
-usage: anidb.py [options]
+usage: env OPENSSL_CONFIG=./openssl.cnf.legacy anidb [options]
 
 options:
   -h, --help            show this help message and exit
